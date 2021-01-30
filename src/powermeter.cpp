@@ -10,14 +10,15 @@ uint8_t clockPin = 3;
 unsigned long prev_ms;
 
 #define CIRCLE_LENGTH 172.5/1000*2*3.14159
-#define MESSAGE_DT_MS 1000
+#define MESSAGE_DT_MS 2000
 #define MEASUREMENT_DT_MS 100
-#define SLEEP_DT_MS 60000 // turn off after 60s
+#define SLEEP_DT_MS 10000 // turn off after 60s
 #define GYRO_DPS_THRESHOLD 10
 #define MIN_POWER 10
 #define CALIBRATE 1
 #define GRAVITY 9.81
 #define CALIBRATION_WEIGHT 12.0
+//#define TEST_SCALE 0
 
 uint32_t start, stop;
 volatile float f;
@@ -41,6 +42,7 @@ unsigned int n_measurements;
 unsigned short revolutions = 0;
 unsigned short timestamp = 0;
 unsigned short flags = 0x20;
+unsigned long tic;
 byte sensorlocation = 0x0D;
 int dt;
 char input;
@@ -112,19 +114,26 @@ void setup() {
 
 
   scale.begin(dataPin, clockPin);
-  scale.set_scale(4900);
-  scale.set_offset(569525);
-
+  scale.set_gain(128);
+  scale.set_scale(5108);
+  scale.tare();
   lastMotion = millis();
 }
 
 void loop() {
+
+  #ifdef TEST_SCALE
+  
+  Serial.println(scale.get_units(1));
+  delay(100);
+  #else
 
   if (millis() - lastMotion > SLEEP_DT_MS) {
     Serial.println("Turning off");
     Serial.close();
     digitalWrite(LED_BUILTIN, LOW);
     digitalWrite(LED_PWR, LOW);
+    IMU.end();
     NRF_POWER->SYSTEMOFF = 1;
   }
 
@@ -165,19 +174,8 @@ void loop() {
     elapsed = 0;
     prev_ms = millis();
     while (true) {
-      if (halfRevolution) {
-        if (ay > 0 && az > 0) {
-          Serial.println("Full Rev");
-          revolutions += 1;
-          halfRevolution = false;
-          break;
-        }
-      } else {
-        if (ay < 0 && az < 0) {
-          halfRevolution = true;
-          Serial.println("Half Rev");
-        }
-      }
+      tic = millis();
+      
 
       // Read gyroscope values
       if (IMU.gyroscopeAvailable()) {
@@ -187,17 +185,36 @@ void loop() {
         IMU.readAcceleration(ax, ay, az);
       }
 
-      if (y > GYRO_DPS_THRESHOLD || y < -GYRO_DPS_THRESHOLD) {
+      //Serial.print("IMU time:");
+      //Serial.println(millis() - tic);
+
+      if (halfRevolution) {
+        if (ax > 0 && az > 0) {
+          Serial.println("Full Rev");
+          revolutions += 1;
+          halfRevolution = false;
+          break;
+        }
+      } else {
+        if (ax < 0 && az < 0) {
+          halfRevolution = true;
+          Serial.println("Half Rev");
+        }
+      }
+      tic = millis();
+      if (x > GYRO_DPS_THRESHOLD || x < -GYRO_DPS_THRESHOLD) {
         lastMotion = millis();
       }
 
       f = scale.get_units(1);
-      avg_power += f * y;
+      avg_power += f * x;
       n_measurements += 1;
       if (millis() - prev_ms > MESSAGE_DT_MS) {
         break;
       }
-      delay(MEASUREMENT_DT_MS);
+      //Serial.print("HX711 time:");
+      //Serial.println(millis() - tic);
+      //delay(MEASUREMENT_DT_MS);
     }
 
     avg_power = avg_power / n_measurements / 360 * CIRCLE_LENGTH;
@@ -232,4 +249,6 @@ void loop() {
   Serial.print("Disconnected from central: ");
   Serial.println(central.address());
   delay(1000);
+
+  #endif
 }
